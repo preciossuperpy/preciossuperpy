@@ -1,86 +1,478 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
   <head>
     <base target="_top">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Precios Super – Tablero</title>
-    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <title>Tablero de Precios - Canasta Básica</title>
+    <script src="https://www.gstatic.com/charts/loader.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-      body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0b1220;color:#e9eef7}
-      header{padding:12px 16px;border-bottom:1px solid #1f2740}
-      h1{font-size:18px;margin:0}
-      .wrap{max-width:1200px;margin:12px auto;padding:0 12px}
-      .grid{display:grid;grid-template-columns: 1fr 1fr; gap: 12px;}
-      .card{background:#141c2f;border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+      :root{
+        --primary:#1a73e8; --primary-dark:#0d47a1; --secondary:#34a853; --danger:#ea4335; --warning:#fbbc04;
+        --dark:#0b1220; --dark-light:#141c2f; --light:#e9eef7; --gray:#8b9cb1;
+      }
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Segoe UI',system-ui,Roboto,Helvetica,Arial,sans-serif;background:var(--dark);color:var(--light);line-height:1.6}
+      header{padding:16px 20px;border-bottom:1px solid var(--dark-light);background:var(--dark-light);box-shadow:0 2px 10px rgba(0,0,0,.2)}
+      h1{font-size:22px;display:flex;align-items:center;gap:10px}
+      .wrap{max-width:1400px;margin:20px auto;padding:0 16px}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+      .card{background:var(--dark-light);border-radius:12px;padding:20px;box-shadow:0 8px 24px rgba(0,0,0,.25);transition:transform .2s,box-shadow .2s}
+      .card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,0,0,.3)}
+      .card-title{font-size:18px;margin-bottom:15px;display:flex;align-items:center;gap:8px;color:var(--light);border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:10px}
+      .filters-panel{grid-column:1 / -1;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:15px;margin-bottom:20px}
+      .filter-group{display:flex;flex-direction:column}
+      .filter-label{margin-bottom:6px;font-size:14px;font-weight:500;display:flex;align-items:center;gap:5px}
+      .info-icon{color:var(--gray);cursor:help;font-size:14px}
+      select,input{padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:var(--light);font-size:14px;transition:border .2s}
+      select:focus,input:focus{outline:none;border-color:var(--primary)}
+      option{background:var(--dark-light)}
+      .checkbox-group{display:flex;align-items:center;gap:8px;margin-top:5px}
+      .checkbox-group input{width:auto}
+      .btn{padding:10px 16px;border-radius:6px;border:none;background:var(--primary);color:#fff;font-weight:500;cursor:pointer;transition:background .2s;display:flex;align-items:center;justify-content:center;gap:6px}
+      .btn:hover{background:var(--primary-dark)}
+      .btn-outline{background:transparent;border:1px solid var(--primary);color:var(--primary)}
+      .btn-outline:hover{background:rgba(26,115,232,.1)}
+      .actions{display:flex;gap:10px;margin-top:10px}
       #table_div{height:500px;overflow:auto}
-      @media (max-width:900px){ .grid{grid-template-columns: 1fr} }
+      .stats{display:flex;gap:15px;margin-bottom:20px;flex-wrap:wrap}
+      .stat-card{background:var(--dark-light);border-radius:8px;padding:15px;flex:1;min-width:150px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+      .stat-value{font-size:24px;font-weight:700;margin-bottom:5px}
+      .stat-label{font-size:14px;color:var(--gray)}
+      .loading{display:flex;justify-content:center;align-items:center;height:200px;flex-direction:column;gap:15px}
+      .spinner{width:40px;height:40px;border:4px solid rgba(255,255,255,.1);border-left:4px solid var(--primary);border-radius:50%;animation:spin 1s linear infinite}
+      @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+      @media (max-width:900px){.grid{grid-template-columns:1fr}.filters-panel{grid-template-columns:1fr 1fr}}
+      @media (max-width:600px){.filters-panel{grid-template-columns:1fr}.stats{flex-direction:column}}
     </style>
   </head>
   <body>
-    <header><h1>Precios Super – Tablero</h1></header>
+    <header>
+      <h1><i class="fas fa-chart-line"></i> Tablero de Precios - Canasta Básica</h1>
+    </header>
+
     <div class="wrap">
+      <div class="filters-panel card">
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-store"></i> Supermercado
+            <i class="fas fa-info-circle info-icon" title="Filtrar por cadena de supermercados"></i>
+          </label>
+          <select id="supermercado"><option value="">Todos los supermercados</option></select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-layer-group"></i> Grupo
+            <i class="fas fa-info-circle info-icon" title="Filtrar por categoría principal de productos"></i>
+          </label>
+          <select id="grupo"><option value="">Todos los grupos</option></select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-tags"></i> Subgrupo
+            <i class="fas fa-info-circle info-icon" title="Filtrar por subcategoría de productos"></i>
+          </label>
+          <select id="subgrupo"><option value="">Todos los subgrupos</option></select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-box"></i> Producto
+            <i class="fas fa-info-circle info-icon" title="Buscar productos específicos"></i>
+          </label>
+          <input type="text" id="producto" placeholder="Nombre del producto...">
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-calendar"></i> Fecha Inicio</label>
+          <input type="date" id="fechaInicio">
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-calendar"></i> Fecha Fin</label>
+          <input type="date" id="fechaFin">
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-filter"></i> Filtros Adicionales</label>
+          <div class="checkbox-group">
+            <input type="checkbox" id="soloCanastaBasica">
+            <label for="soloCanastaBasica">Solo productos de canasta básica</label>
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label"><i class="fas fa-chart-line"></i> Categoría Series Temporales</label>
+          <select id="timeSeriesCategory">
+            <option value="Grupo">Por Grupo</option>
+            <option value="Subgrupo">Por Subgrupo</option>
+            <option value="Producto">Por Producto</option>
+          </select>
+        </div>
+
+        <div class="actions">
+          <button class="btn" onclick="applyFilters()"><i class="fas fa-filter"></i> Aplicar Filtros</button>
+          <button class="btn btn-outline" onclick="resetFilters()"><i class="fas fa-redo"></i> Restablecer</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat-card">
+          <div class="stat-value" id="totalProductos">-</div>
+          <div class="stat-label">Total Productos</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="precioPromedio">-</div>
+          <div class="stat-label">Precio Promedio</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="totalSupermercados">-</div>
+          <div class="stat-label">Supermercados</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="totalGrupos">-</div>
+          <div class="stat-label">Categorías</div>
+        </div>
+      </div>
+
       <div class="grid">
-        <div class="card"><div id="chart_div" style="height:420px"></div></div>
-        <div class="card"><div id="chart2_div" style="height:420px"></div></div>
-        <div class="card" style="grid-column:1 / -1"><div id="table_div"></div></div>
+        <div class="card">
+          <div class="card-title"><i class="fas fa-chart-bar"></i> Precio Promedio por Grupo</div>
+          <div id="chart_div" style="height:420px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><i class="fas fa-chart-line"></i> Evolución de Precios
+            <i class="fas fa-info-circle info-icon" title="Series temporales con líneas suavizadas"></i>
+          </div>
+          <div id="time_series_chart" style="height:420px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><i class="fas fa-sort-amount-up"></i> Top 10 Productos Más Caros</div>
+          <div id="chart_top10" style="height:420px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><i class="fas fa-balance-scale"></i> Comparativa por Supermercado</div>
+          <div id="chart_supermercados" style="height:420px"></div>
+        </div>
+
+        <div class="card" style="grid-column:1 / -1">
+          <div class="card-title"><i class="fas fa-table"></i> Datos Detallados</div>
+          <div id="table_div"></div>
+        </div>
       </div>
     </div>
 
     <script>
-      google.charts.load('current', {'packages':['corechart','table']});
+      let currentData = [];
+      let uniqueValues = {};
+      let pendingLoads = 0; // coordinar overlay
+
+      google.charts.load('current', { packages: ['corechart','table'] });
       google.charts.setOnLoadCallback(init);
 
-      function init(){
-        google.script.run.withSuccessHandler(draw).getData(1500);
+      function showLoading(){ document.getElementById('loading').style.display = 'flex'; }
+      function hideLoading(){ document.getElementById('loading').style.display = 'none'; }
+      function addPending(){ pendingLoads++; showLoading(); }
+      function donePending(){ pendingLoads = Math.max(0, pendingLoads - 1); if (!pendingLoads) hideLoading(); }
+
+      function init() {
+        addPending();
+        google.script.run.withSuccessHandler((res) => {
+          handleData(res);
+          donePending();
+        }).getData({});
+        // Cargar series temporales por defecto
+        addPending();
+        google.script.run.withSuccessHandler((res) => {
+          drawTimeSeriesChart(res);
+          donePending();
+        }).getTimeSeriesData({ timeSeriesCategory: document.getElementById('timeSeriesCategory').value });
       }
 
-      function draw(rows){
-        // Construir DataTable
-        const data = new google.visualization.DataTable();
-        data.addColumn('string','Supermercado');
-        data.addColumn('string','Grupo');
-        data.addColumn('string','Subgrupo');
-        data.addColumn('string','Producto');
-        data.addColumn('number','Precio');
-        data.addColumn('string','FechaConsulta');
+      function handleData(response) {
+        currentData = response.data || [];
+        uniqueValues = response.uniqueValues || {supermercados:[],grupos:[],subgrupos:[],productos:[]};
 
-        for (const r of rows){
-          data.addRow([
-            r.Supermercado||'',
-            r.Grupo||'',
-            r.Subgrupo||'',
-            r.Producto||'',
-            r.Precio!=null? Number(r.Precio): null,
-            r.FechaConsulta||''
-          ]);
+        populateFilter('supermercado', uniqueValues.supermercados);
+        populateFilter('grupo', uniqueValues.grupos);
+        populateFilter('subgrupo', uniqueValues.subgrupos);
+
+        updateStats();
+        drawCharts();
+      }
+
+      function populateFilter(id, values) {
+        const select = document.getElementById(id);
+        while (select.options.length > 1) select.remove(1);
+        (values || []).forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v; opt.textContent = v;
+          select.appendChild(opt);
+        });
+      }
+
+      function getFilters() {
+        return {
+          supermercado: document.getElementById('supermercado').value,
+          grupo: document.getElementById('grupo').value,
+          subgrupo: document.getElementById('subgrupo').value,
+          producto: document.getElementById('producto').value,
+          fechaInicio: document.getElementById('fechaInicio').value,
+          fechaFin: document.getElementById('fechaFin').value,
+          soloCanastaBasica: document.getElementById('soloCanastaBasica').checked,
+          timeSeriesCategory: document.getElementById('timeSeriesCategory').value
+        };
+      }
+
+      function applyFilters() {
+        const filters = getFilters();
+        addPending();
+        google.script.run.withSuccessHandler((res) => {
+          handleData(res);
+          donePending();
+        }).getData(filters);
+
+        addPending();
+        google.script.run.withSuccessHandler((res) => {
+          drawTimeSeriesChart(res);
+          donePending();
+        }).getTimeSeriesData(filters);
+      }
+
+      function resetFilters() {
+        document.getElementById('supermercado').value = '';
+        document.getElementById('grupo').value = '';
+        document.getElementById('subgrupo').value = '';
+        document.getElementById('producto').value = '';
+        document.getElementById('fechaInicio').value = '';
+        document.getElementById('fechaFin').value = '';
+        document.getElementById('soloCanastaBasica').checked = false;
+        document.getElementById('timeSeriesCategory').value = 'Grupo';
+        applyFilters();
+      }
+
+      function updateStats() {
+        if (!currentData.length) {
+          document.getElementById('totalProductos').textContent = '0';
+          document.getElementById('precioPromedio').textContent = '$0';
+          document.getElementById('totalSupermercados').textContent = '0';
+          document.getElementById('totalGrupos').textContent = '0';
+          return;
+        }
+        const precios = currentData.map(x => x.Precio).filter(p => typeof p === 'number' && p > 0);
+        const prom = precios.length ? (precios.reduce((a,b)=>a+b,0) / precios.length) : 0;
+        const supermercados = new Set(currentData.map(x => x.Supermercado).filter(Boolean));
+        const grupos = new Set(currentData.map(x => x.Grupo).filter(Boolean));
+
+        document.getElementById('totalProductos').textContent = currentData.length.toLocaleString();
+        document.getElementById('precioPromedio').textContent = '$' + prom.toFixed(2);
+        document.getElementById('totalSupermercados').textContent = supermercados.size;
+        document.getElementById('totalGrupos').textContent = grupos.size;
+      }
+
+      function drawCharts() {
+        drawColumnChart();
+        drawTop10Chart();
+        drawSupermercadosChart();
+        drawTable();
+      }
+
+      function currencyFormatter(prefix='$') {
+        return new google.visualization.NumberFormat({ prefix, groupingSymbol: '.', fractionDigits: 2 });
+      }
+
+      function drawColumnChart() {
+        const el = document.getElementById('chart_div');
+        if (!currentData.length) {
+          el.innerHTML = emptyMsg('No hay datos para mostrar'); return;
+        }
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'Grupo');
+        data.addColumn('number', 'Precio Promedio');
+
+        const byGrupo = {};
+        currentData.forEach(it => {
+          if (typeof it.Precio !== 'number') return;
+          if (!byGrupo[it.Grupo]) byGrupo[it.Grupo] = {s:0,c:0};
+          byGrupo[it.Grupo].s += it.Precio; byGrupo[it.Grupo].c++;
+        });
+        Object.keys(byGrupo).forEach(g => {
+          data.addRow([g, byGrupo[g].s / byGrupo[g].c]);
+        });
+
+        currencyFormatter('$').format(data, 1);
+
+        const options = {
+          title: 'Precio Promedio por Categoría',
+          legend: { position: 'none' },
+          backgroundColor: 'transparent',
+          titleTextStyle: { color: '#e9eef7', fontSize: 16 },
+          hAxis: { textStyle: { color: '#e9eef7' } },
+          vAxis: { textStyle: { color: '#e9eef7' } },
+          colors: ['#1a73e8'],
+          bar: { groupWidth: '70%' }
+        };
+
+        new google.visualization.ColumnChart(el).draw(data, options);
+      }
+
+      function drawTop10Chart() {
+        const el = document.getElementById('chart_top10');
+        if (!currentData.length) { el.innerHTML = emptyMsg('No hay datos para mostrar'); return; }
+
+        // Agrupar por producto y calcular promedio
+        const byProd = {};
+        currentData.forEach(it => {
+          if (typeof it.Precio !== 'number') return;
+          const k = it.Producto || 'Sin nombre';
+          if (!byProd[k]) byProd[k] = { s:0, c:0 };
+          byProd[k].s += it.Precio; byProd[k].c++;
+        });
+        const rows = Object.keys(byProd)
+          .map(p => [p, byProd[p].s / byProd[p].c])
+          .sort((a,b) => b[1] - a[1])
+          .slice(0, 10);
+
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'Producto');
+        data.addColumn('number', 'Precio');
+        data.addRows(rows);
+
+        currencyFormatter('$').format(data, 1);
+
+        const options = {
+          title: 'Top 10 Productos Más Caros (promedio)',
+          legend: { position: 'none' },
+          backgroundColor: 'transparent',
+          titleTextStyle: { color: '#e9eef7', fontSize: 16 },
+          hAxis: { textStyle: { color: '#e9eef7' } },
+          vAxis: { textStyle: { color: '#e9eef7' } },
+          colors: ['#34a853']
+        };
+
+        new google.visualization.BarChart(el).draw(data, options);
+      }
+
+      function drawSupermercadosChart() {
+        const el = document.getElementById('chart_supermercados');
+        if (!currentData.length) { el.innerHTML = emptyMsg('No hay datos para mostrar'); return; }
+
+        const byMarket = {};
+        currentData.forEach(it => {
+          if (typeof it.Precio !== 'number') return;
+          const k = it.Supermercado || 'Sin nombre';
+          if (!byMarket[k]) byMarket[k] = { s:0, c:0 };
+          byMarket[k].s += it.Precio; byMarket[k].c++;
+        });
+
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'Supermercado');
+        data.addColumn('number', 'Precio Promedio');
+        Object.keys(byMarket).forEach(m => data.addRow([m, byMarket[m].s / byMarket[m].c]));
+
+        currencyFormatter('$').format(data, 1);
+
+        const options = {
+          title: 'Comparativa de Precios por Supermercado',
+          legend: { position: 'none' },
+          backgroundColor: 'transparent',
+          titleTextStyle: { color: '#e9eef7', fontSize: 16 },
+          hAxis: { textStyle: { color: '#e9eef7' } },
+          vAxis: { textStyle: { color: '#e9eef7' } },
+          colors: ['#fbbc04']
+        };
+
+        new google.visualization.ColumnChart(el).draw(data, options);
+      }
+
+      function updateTimeSeries(filters) {
+        addPending();
+        google.script.run.withSuccessHandler((res) => {
+          drawTimeSeriesChart(res);
+          donePending();
+        }).getTimeSeriesData(filters);
+      }
+
+      function drawTimeSeriesChart(response) {
+        const el = document.getElementById('time_series_chart');
+        if (!response || !response.timeSeries || !Object.keys(response.timeSeries).length) {
+          el.innerHTML = emptyMsg('No hay datos para series temporales'); return;
         }
 
-        // Chart: Precio promedio por Grupo
-        const view1 = new google.visualization.DataView(data);
-        // Agrupamos: promedio de precio por Grupo
-        const groupData = google.visualization.data.group(
-          view1,
-          [1], // Grupo
-          [{'column':4, 'aggregation': google.visualization.data.avg, 'type':'number', 'label':'Precio Promedio'}]
-        );
-        const chart1 = new google.visualization.ColumnChart(document.getElementById('chart_div'));
-        chart1.draw(groupData, {legend:{position:'none'}, backgroundColor:'transparent', titleTextStyle:{color:'#e9eef7'}, hAxis:{textStyle:{color:'#e9eef7'}}, vAxis:{textStyle:{color:'#e9eef7'}}});
+        const data = new google.visualization.DataTable();
+        data.addColumn('date', 'Fecha');
 
-        // Chart: Top 10 productos más caros
-        const sorted = new google.visualization.DataView(data);
-        sorted.setRows(data.getSortedRows([{column:4, desc:true}]));
-        const top10 = new google.visualization.DataView(sorted);
-        top10.setRows([...Array(Math.min(10, sorted.getNumberOfRows())).keys()]);
-        const selCols = new google.visualization.DataView(top10);
-        selCols.setColumns([3,4]); // Producto, Precio
-        const chart2 = new google.visualization.BarChart(document.getElementById('chart2_div'));
-        chart2.draw(selCols, {legend:{position:'none'}, backgroundColor:'transparent', titleTextStyle:{color:'#e9eef7'}, hAxis:{textStyle:{color:'#e9eef7'}}, vAxis:{textStyle:{color:'#e9eef7'}}});
+        const cats = response.categories || [];
+        const dates = (response.dates || []).map(s => new Date(s + 'T00:00:00'));
 
-        // Table
-        const tbl = new google.visualization.Table(document.getElementById('table_div'));
-        tbl.draw(data, {showRowNumber:true, width:'100%', height:'100%'});
+        cats.forEach(c => data.addColumn('number', c));
+
+        dates.forEach((d, idx) => {
+          const row = [d];
+          cats.forEach(c => {
+            const pair = response.timeSeries[c] && response.timeSeries[c][idx];
+            row.push(pair ? pair[1] : null);
+          });
+          data.addRow(row);
+        });
+
+        // Formato moneda para todas las series (desde columna 1 a N)
+        const fmt = currencyFormatter('$');
+        for (let col = 1; col <= cats.length; col++) fmt.format(data, col);
+
+        const options = {
+          title: 'Evolución de Precios en el Tiempo',
+          curveType: 'function',
+          legend: { position: 'bottom', textStyle: { color: '#e9eef7' } },
+          backgroundColor: 'transparent',
+          titleTextStyle: { color: '#e9eef7', fontSize: 16 },
+          hAxis: { textStyle: { color: '#e9eef7' }, format: 'MMM yyyy' },
+          vAxis: { textStyle: { color: '#e9eef7' } },
+          colors: ['#1a73e8','#34a853','#fbbc04','#ea4335','#9c27b0','#009688','#ff9800','#795548','#607d8b','#e91e63']
+        };
+
+        new google.visualization.LineChart(el).draw(data, options);
+      }
+
+      function drawTable() {
+        const el = document.getElementById('table_div');
+        if (!currentData.length) { el.innerHTML = emptyMsg('No hay datos para mostrar en la tabla'); return; }
+
+        const data = new google.visualization.DataTable();
+        data.addColumn('string', 'Supermercado');
+        data.addColumn('string', 'Grupo');
+        data.addColumn('string', 'Subgrupo');
+        data.addColumn('string', 'Producto');
+        data.addColumn('number', 'Precio');
+        data.addColumn('string', 'FechaConsulta');
+
+        currentData.forEach(r => {
+          data.addRow([
+            r.Supermercado || '',
+            r.Grupo || '',
+            r.Subgrupo || '',
+            r.Producto || '',
+            (typeof r.Precio === 'number') ? r.Precio : null,
+            r.FechaConsulta || ''
+          ]);
+        });
+
+        currencyFormatter('$').format(data, 4);
+
+        const table = new google.visualization.Table(el);
+        table.draw(data, { showRowNumber: true, width: '100%', height: '100%' });
+      }
+
+      function emptyMsg(msg){
+        return `<div class="loading"><div class="spinner"></div><p>${msg}</p></div>`;
       }
     </script>
+
+    <div id="loading" class="loading" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(11,18,32,.9);z-index:1000">
+      <div class="spinner"></div>
+      <p>Cargando datos...</p>
+    </div>
   </body>
 </html>
