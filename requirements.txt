@@ -1,6 +1,11 @@
 google-api-python-client>=2.129.0
-google-auth>=2.34.0
-gspread>=6.1.2
-gspread-dataframe>=3.3.1
-pandas>=2.2.2
-numpy>=1.26.4
+requests>=2.31,<2.33
+urllib3>=1.26.18,<3
+beautifulsoup4>=4.12
+pandas>=2.0
+numpy>=1.24
+gspread>=5.7
+google-auth>=2.23
+gspread-dataframe>=3.3
+lxml>=4.9
+
