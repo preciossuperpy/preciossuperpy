@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Scraper unificado de precios – Portable (Colab y no Colab)
+Scraper unificado de precios – Portable (GitHub Actions, local y Colab)
 Append histórico a Google Sheets con enriquecimiento de unidades
 """
 
@@ -17,11 +17,6 @@ import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-
-import os
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"J:\Mi unidad\preciossuper\scrappinsupermercados-1ce00b82eb71_b.json"
-
 
 # ───────── 0) Entorno (Colab opcional) ─────────
 IS_COLAB = False
@@ -43,10 +38,13 @@ OUT_DIR = os.getenv(
 )
 os.makedirs(OUT_DIR, exist_ok=True)
 
-PATTERN_DAILY   = os.path.join(OUT_DIR, "*_canasta_*.csv")
+PATTERN_DAILY = os.path.join(OUT_DIR, "*_canasta_*.csv")
+
 # Si usas GOOGLE_APPLICATION_CREDENTIALS (ruta) no hace falta tocar CREDS_JSON
-CREDS_JSON      = os.getenv("GOOGLE_APPLICATION_CREDENTIALS",
-                            "/content/drive/My Drive/preciossuper/scrappinsupermercados-1ce00b82eb71.json" if IS_COLAB else "./service_account.json")
+CREDS_JSON = os.getenv(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "/content/drive/My Drive/preciossuper/scrappinsupermercados-1ce00b82eb71.json" if IS_COLAB else "./service_account.json"
+)
 
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1plZ1LzHu2W2TrbV7wXPueWsO2g4dFRyUdpxXIUE5ns8"
 WORKSHEET_NAME  = "precios_supermercados"
@@ -60,35 +58,53 @@ from gspread_dataframe import set_with_dataframe, get_as_dataframe
 from google.oauth2.service_account import Credentials
 
 def _make_credentials():
-    scopes = ["https://www.googleapis.com/auth/drive",
-              "https://www.googleapis.com/auth/spreadsheets"]
-    # Permitir pasar el JSON por variable de entorno SERVICE_ACCOUNT_JSON
+    """
+    Preferencias:
+      1) SERVICE_ACCOUNT_JSON (contenido JSON, recomendado en CI)
+      2) GOOGLE_APPLICATION_CREDENTIALS (ruta a archivo)
+      3) CREDS_JSON (ruta por defecto si existe)
+    """
+    scopes = [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets",
+    ]
+
     js = os.getenv("SERVICE_ACCOUNT_JSON")
     if js:
-        info = json.loads(js)
-        return Credentials.from_service_account_info(info, scopes=scopes)
-    # Si no, usar archivo (GOOGLE_APPLICATION_CREDENTIALS o CREDS_JSON)
-    path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", CREDS_JSON)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"No se encontró el archivo de credenciales en '{path}'. "
-            "Define GOOGLE_APPLICATION_CREDENTIALS o SERVICE_ACCOUNT_JSON."
-        )
-    return Credentials.from_service_account_file(path, scopes=scopes)
+        try:
+            info = json.loads(js)
+            return Credentials.from_service_account_info(info, scopes=scopes)
+        except Exception as e:
+            raise RuntimeError(f"SERVICE_ACCOUNT_JSON inválido: {e}")
+
+    path_env = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if path_env and os.path.exists(path_env):
+        return Credentials.from_service_account_file(path_env, scopes=scopes)
+
+    if CREDS_JSON and os.path.exists(CREDS_JSON):
+        return Credentials.from_service_account_file(CREDS_JSON, scopes=scopes)
+
+    raise FileNotFoundError(
+        "No se encontraron credenciales. Provee una de estas opciones:\n"
+        "- Secreto SERVICE_ACCOUNT_JSON (contenido del JSON)\n"
+        "- Variable GOOGLE_APPLICATION_CREDENTIALS (ruta a archivo JSON)\n"
+        "- Archivo local CREDS_JSON existente"
+    )
 
 def _open_sheet():
     cred = _make_credentials()
-    sh   = gspread.authorize(cred).open_by_url(SPREADSHEET_URL)
+    sh = gspread.authorize(cred).open_by_url(SPREADSHEET_URL)
     try:
         ws = sh.worksheet(WORKSHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=WORKSHEET_NAME, rows="1000", cols="60")
+
     df = get_as_dataframe(ws, dtype=str, header=0, evaluate_formulas=False).dropna(how="all")
     return ws, df
 
-def _write_sheet(ws, df):
-    ws.clear()
-    set_with_dataframe(ws, df, include_index=False)
+def _write_sheet(ws, df: pd.DataFrame):
+    # Redimensiona la hoja a las columnas del DataFrame y carga todo de una
+    set_with_dataframe(ws, df, include_index=False, resize=True)
 
 # ───────── 3) Texto & Clasificación ─────────
 def strip_accents(txt: str) -> str:
@@ -249,14 +265,27 @@ def _first_price(node: BeautifulSoup, sels: List[str] = None) -> float:
     return 0.0
 
 def _build_session() -> requests.Session:
-    retry = Retry(total=3, backoff_factor=1.2,
-                  status_forcelist=(429,500,502,503,504),
-                  allowed_methods=("GET","HEAD"), raise_on_status=False)
+    # Compatibilidad urllib3 (allowed_methods vs method_whitelist)
+    try:
+        retry = Retry(
+            total=3, backoff_factor=1.2,
+            status_forcelist=(429,500,502,503,504),
+            allowed_methods=frozenset(["GET","HEAD"]),
+            raise_on_status=False
+        )
+    except TypeError:
+        retry = Retry(
+            total=3, backoff_factor=1.2,
+            status_forcelist=(429,500,502,503,504),
+            method_whitelist=frozenset(["GET","HEAD"]),  # fallback
+            raise_on_status=False
+        )
     ad = HTTPAdapter(max_retries=retry)
     s = requests.Session()
     s.headers["User-Agent"] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                "AppleWebKit/537.36 (KHTML, like Gecko) "
                                "Chrome/123 Safari/537.36")
+    s.trust_env = True  # respeta proxies del runner si existen
     s.mount("http://", ad); s.mount("https://", ad)
     return s
 
@@ -291,6 +320,7 @@ class HtmlSiteScraper:
                         row["FechaConsulta"] = fecha
                         out.append(row)
                 except Exception:
+                    # Continúa con otras categorías si alguna falla
                     pass
         return out
 
@@ -304,7 +334,8 @@ class StockScraper(HtmlSiteScraper):
     def category_urls(self):
         try:
             r = self.session.get(self.base_url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.text, "html.parser")
         urls = set()
         for a in soup.select('a[href*="/category/"]'):
@@ -315,7 +346,8 @@ class StockScraper(HtmlSiteScraper):
     def parse_category(self, url):
         try:
             r = self.session.get(url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.content, "html.parser")
         rows=[]
         for p in soup.select("div.product-item"):
@@ -335,7 +367,8 @@ class SuperseisScraper(HtmlSiteScraper):
     def category_urls(self):
         try:
             r = self.session.get(self.base_url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.text, "html.parser")
         urls=set()
         for a in soup.select('a[href*="/category/"]'):
@@ -346,7 +379,8 @@ class SuperseisScraper(HtmlSiteScraper):
     def parse_category(self, url):
         try:
             r = self.session.get(url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.content, "html.parser")
         rows=[]
         for a in soup.select("a.product-title-link"):
@@ -365,7 +399,8 @@ class SalemmaScraper(HtmlSiteScraper):
     def category_urls(self):
         try:
             r = self.session.get(self.base_url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.text, "html.parser")
         urls=set()
         for a in soup.find_all("a", href=True):
@@ -376,7 +411,8 @@ class SalemmaScraper(HtmlSiteScraper):
     def parse_category(self, url):
         try:
             r = self.session.get(url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.content, "html.parser")
         rows=[]
         for f in soup.select("form.productsListForm"):
@@ -397,7 +433,8 @@ class AreteScraper(HtmlSiteScraper):
     def category_urls(self):
         try:
             r = self.session.get(self.base_url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.text, "html.parser")
         urls=set()
         for sel in ("#departments-menu","#menu-departments-menu-1"):
@@ -409,7 +446,8 @@ class AreteScraper(HtmlSiteScraper):
     def parse_category(self, url):
         try:
             r = self.session.get(url, timeout=REQ_TIMEOUT); r.raise_for_status()
-        except Exception: return []
+        except Exception:
+            return []
         soup = BeautifulSoup(r.content, "html.parser")
         rows=[]
         for p in soup.select("div.product"):
@@ -477,7 +515,7 @@ SCRAPERS: Dict[str, Callable] = {
 def _parse_args(argv=None):
     if argv is None: return list(SCRAPERS)
     if any(a in ("-h","--help") for a in argv):
-        print("Uso: python script.py [sitio1 sitio2 …]"); sys.exit(0)
+        print("Uso: python pipeline_ingesta.py [sitio1 sitio2 …]"); sys.exit(0)
     sel = [a for a in argv if a in SCRAPERS]
     return sel or list(SCRAPERS)
 
@@ -496,12 +534,14 @@ def main(argv=None):
         print("Sin datos nuevos.")
         return 0
 
+    # Concatena CSVs diarios (si existen) o usa los registros en memoria
     csvs = glob.glob(PATTERN_DAILY)
     if csvs:
         df_all = pd.concat([pd.read_csv(f, dtype=str) for f in csvs], ignore_index=True, sort=False)
     else:
         df_all = pd.DataFrame(registros)
 
+    # Normalizaciones
     df_all["Grupo"]  = df_all["Grupo"].map(strip_accents).fillna("")
     df_all["Precio"] = pd.to_numeric(df_all["Precio"], errors="coerce")
 
@@ -509,7 +549,7 @@ def main(argv=None):
     df_all["Subgrupo"] = [assign_subgroup(n, g) for n, g in zip(df_all.get("Producto",""), df_all.get("Grupo",""))]
     df_all = enrich_unit_cols(df_all)
 
-    # Abrir hoja y unir con histórico previo
+    # Asegura columnas objetivo, tanto en actual como en histórico previo
     ws, df_prev = _open_sheet()
     target_cols = [
         "ID","Supermercado","Producto","Precio","Unidad","Grupo","Subgrupo",
@@ -517,13 +557,20 @@ def main(argv=None):
         "CategoríaURL"
     ]
     for c in target_cols:
-        if c not in df_all.columns: df_all[c] = np.nan
+        if c not in df_all.columns:  df_all[c]  = np.nan
         if c not in df_prev.columns: df_prev[c] = np.nan
 
     base = pd.concat([df_prev[target_cols], df_all[target_cols]], ignore_index=True, sort=False)
+
+    # Orden y de-duplicación
     base["FechaConsulta"] = pd.to_datetime(base["FechaConsulta"], errors="coerce")
     base.sort_values("FechaConsulta", inplace=True)
+
     base["FechaConsulta"] = base["FechaConsulta"].dt.strftime("%Y-%m-%d")
+    # Garantiza que las claves existan antes de de-duplicar
+    for k in KEY_COLS:
+        if k not in base.columns:
+            base[k] = ""
     base.drop_duplicates(KEY_COLS, keep="first", inplace=True)
 
     # ID secuencial
