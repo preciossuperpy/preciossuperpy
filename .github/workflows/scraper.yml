@@ -3,34 +3,22 @@ name: scrape-prices
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 12 * * *'  # corre todos los días 12:15 UTC (ajusta a tu gusto)
+    - cron: '15 12 * * *'  # ajusta horario UTC
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      # Opción A: pasar el JSON completo como texto
       SERVICE_ACCOUNT_JSON: ${{ secrets.GSHEETS_SA_JSON }}
-      # Opción B: si prefieres archivo, comenta lo de arriba y usa GOOGLE_APPLICATION_CREDENTIALS (ver paso "Write creds")
       OUT_DIR: ./data
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # Opción B (alternativa): escribir archivo y usar GOOGLE_APPLICATION_CREDENTIALS
-      # - name: Write creds file
-      #   run: |
-      #     echo '${{ secrets.GSHEETS_SA_JSON }}' > $RUNNER_TEMP/creds.json
-      #     echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/creds.json" >> $GITHUB_ENV
-
-      - name: Run scraper
-        run: |
-          python pipeline_ingesta.py
+      - name: Run pipeline
+        run: python pipeline_ingesta.py
