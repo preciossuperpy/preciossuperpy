@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Precios Super – Tablero</title>
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <style>
+      body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0b1220;color:#e9eef7}
+      header{padding:12px 16px;border-bottom:1px solid #1f2740}
+      h1{font-size:18px;margin:0}
+      .wrap{max-width:1200px;margin:12px auto;padding:0 12px}
+      .grid{display:grid;grid-template-columns: 1fr 1fr; gap: 12px;}
+      .card{background:#141c2f;border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+      #table_div{height:500px;overflow:auto}
+      @media (max-width:900px){ .grid{grid-template-columns: 1fr} }
+    </style>
+  </head>
+  <body>
+    <header><h1>Precios Super – Tablero</h1></header>
+    <div class="wrap">
+      <div class="grid">
+        <div class="card"><div id="chart_div" style="height:420px"></div></div>
+        <div class="card"><div id="chart2_div" style="height:420px"></div></div>
+        <div class="card" style="grid-column:1 / -1"><div id="table_div"></div></div>
+      </div>
+    </div>
+
+    <script>
+      google.charts.load('current', {'packages':['corechart','table']});
+      google.charts.setOnLoadCallback(init);
+
+      function init(){
+        google.script.run.withSuccessHandler(draw).getData(1500);
+      }
+
+      function draw(rows){
+        // Construir DataTable
+        const data = new google.visualization.DataTable();
+        data.addColumn('string','Supermercado');
+        data.addColumn('string','Grupo');
+        data.addColumn('string','Subgrupo');
+        data.addColumn('string','Producto');
+        data.addColumn('number','Precio');
+        data.addColumn('string','FechaConsulta');
+
+        for (const r of rows){
+          data.addRow([
+            r.Supermercado||'',
+            r.Grupo||'',
+            r.Subgrupo||'',
+            r.Producto||'',
+            r.Precio!=null? Number(r.Precio): null,
+            r.FechaConsulta||''
+          ]);
+        }
+
+        // Chart: Precio promedio por Grupo
+        const view1 = new google.visualization.DataView(data);
+        // Agrupamos: promedio de precio por Grupo
+        const groupData = google.visualization.data.group(
+          view1,
+          [1], // Grupo
+          [{'column':4, 'aggregation': google.visualization.data.avg, 'type':'number', 'label':'Precio Promedio'}]
+        );
+        const chart1 = new google.visualization.ColumnChart(document.getElementById('chart_div'));
+        chart1.draw(groupData, {legend:{position:'none'}, backgroundColor:'transparent', titleTextStyle:{color:'#e9eef7'}, hAxis:{textStyle:{color:'#e9eef7'}}, vAxis:{textStyle:{color:'#e9eef7'}}});
+
+        // Chart: Top 10 productos más caros
+        const sorted = new google.visualization.DataView(data);
+        sorted.setRows(data.getSortedRows([{column:4, desc:true}]));
+        const top10 = new google.visualization.DataView(sorted);
+        top10.setRows([...Array(Math.min(10, sorted.getNumberOfRows())).keys()]);
+        const selCols = new google.visualization.DataView(top10);
+        selCols.setColumns([3,4]); // Producto, Precio
+        const chart2 = new google.visualization.BarChart(document.getElementById('chart2_div'));
+        chart2.draw(selCols, {legend:{position:'none'}, backgroundColor:'transparent', titleTextStyle:{color:'#e9eef7'}, hAxis:{textStyle:{color:'#e9eef7'}}, vAxis:{textStyle:{color:'#e9eef7'}}});
+
+        // Table
+        const tbl = new google.visualization.Table(document.getElementById('table_div'));
+        tbl.draw(data, {showRowNumber:true, width:'100%', height:'100%'});
+      }
+    </script>
+  </body>
+</html>
