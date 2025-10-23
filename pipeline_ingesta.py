@@ -2,6 +2,7 @@
 """
 Scraper unificado de precios – Portable (GitHub Actions, local y Colab)
 Append histórico a Google Sheets con enriquecimiento de unidades
+Robusto ante el límite de 10.000.000 celdas de Google Sheets.
 """
 
 from __future__ import annotations
@@ -51,11 +52,13 @@ WORKSHEET_NAME  = "precios_supermercados"
 
 MAX_WORKERS, REQ_TIMEOUT = 8, 10
 KEY_COLS = ["Supermercado", "CategoríaURL", "Producto", "FechaConsulta"]
+SHEETS_CELL_LIMIT = 10_000_000  # límite global por libro
 
 # ───────── 2) Dependencias Google Sheets ─────────
 import gspread
 from gspread_dataframe import set_with_dataframe, get_as_dataframe
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 def _make_credentials():
     """
@@ -93,43 +96,120 @@ def _make_credentials():
 
 def _open_sheet():
     cred = _make_credentials()
-    sh = gspread.authorize(cred).open_by_url(SPREADSHEET_URL)
+    gc = gspread.authorize(cred)
+    sh = gc.open_by_url(SPREADSHEET_URL)
     try:
         ws = sh.worksheet(WORKSHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=WORKSHEET_NAME, rows="1000", cols="60")
 
-    df = get_as_dataframe(ws, dtype=str, header=0, evaluate_formulas=False).dropna(how="all")
-    return ws, df
+    df_prev = get_as_dataframe(ws, dtype=str, header=0, evaluate_formulas=False).dropna(how="all")
+    return sh, ws, df_prev
 
-# Reemplaza tu _write_sheet por esto:
-from gspread_dataframe import set_with_dataframe
-from gspread.utils import rowcol_to_a1
+def _audit_total_cells(sh: gspread.Spreadsheet) -> int:
+    total = 0
+    for w in sh.worksheets():
+        total += (w.row_count * w.col_count)
+    return int(total)
 
-def _write_sheet(ws, df):
-    # 1) Limita columnas a las necesarias
-    df = df.copy()  # y, si procede, df = df[target_cols].copy()
+def _fits_without_growth(sh: gspread.Spreadsheet, ws: gspread.Worksheet, need_rows: int, need_cols: int) -> Tuple[bool, str]:
+    """
+    Devuelve (cabe_sin_crecer, motivo).
+    Intenta primero achicar la hoja target para liberar celdas si está sobredimensionada.
+    """
+    curr_rows, curr_cols = ws.row_count, ws.col_count
+    total_cells_before = _audit_total_cells(sh)
 
-    # 2) Calcula tamaño objetivo (encabezado + datos)
-    nrows = len(df) + 1
-    ncols = len(df.columns)
+    # Si está sobredimensionada, achicamos hasta el tamaño objetivo o el mínimo requerido
+    shrink_rows = min(curr_rows, max(need_rows, 1))
+    shrink_cols = min(curr_cols, max(need_cols, 1))
+    did_shrink = False
+    if shrink_rows < curr_rows or shrink_cols < curr_cols:
+        ws.resize(rows=shrink_rows, cols=shrink_cols)
+        did_shrink = True
 
-    # 3) Aumenta sólo si hace falta (sin 'resize' masivo)
-    #    OJO: cada add_rows/add_cols suma celdas al libro; evita exceso.
-    add_r = max(0, nrows - ws.row_count)
-    add_c = max(0, ncols - ws.col_count)
-    if add_r:
-        ws.add_rows(add_r)   # evita redimensionar a millones
-    if add_c:
-        ws.add_cols(add_c)
+    # Recalcula métricas tras el shrink (si lo hubo)
+    curr_rows, curr_cols = ws.row_count, ws.col_count
+    total_now = _audit_total_cells(sh)
 
-    # 4) Limpia el rango objetivo (no toda la hoja)
+    # Si ya tenemos suficientes filas/columnas después del shrink, cabe sin crecer
+    if curr_rows >= need_rows and curr_cols >= need_cols:
+        return True, "Cabe tras compactar hoja destino"
+
+    # Si todavía faltan filas/columnas, calcula si crecer sobrepasaría el límite global
+    add_rows = max(0, need_rows - curr_rows)
+    add_cols = max(0, need_cols - curr_cols)
+
+    # Celdas que se añadirían si aumentamos SOLO filas o SOLO columnas o ambos.
+    # Aumento real al crecer: 
+    # - Si creces filas: add_rows * curr_cols (más, si luego creces columnas)
+    # - Si creces cols : add_cols * need_rows (considerando el alto final)
+    grow_rows_cells = add_rows * curr_cols
+    grow_cols_cells = add_cols * max(need_rows, curr_rows + add_rows)
+
+    projected = total_now + grow_rows_cells + grow_cols_cells
+    if projected <= SHEETS_CELL_LIMIT:
+        return False, "Requiere crecer pero no supera límite (permitido)"
+    else:
+        return False, "Requiere crecer y superaría el límite global"
+
+def _write_sheet(ws: gspread.Worksheet, sh: gspread.Spreadsheet, df: pd.DataFrame):
+    """
+    Escritura robusta:
+      1) Compacta la hoja al tamaño objetivo si está inflada (reduce celdas).
+      2) Si aún no entra y crecer superaría el límite, recorta df (tail) para encajar.
+      3) Limpia SOLO el rango objetivo; escribe con resize=False (no crece de más).
+    """
+    if df is None or df.empty:
+        print("No hay datos para escribir.")
+        return
+
+    # Toma sólo columnas presentes (sin None) y asegura al menos 1x1
+    df = df.copy()
+    df = df[[c for c in df.columns if c is not None]]
+    nrows = max(len(df) + 1, 1)  # +header
+    ncols = max(len(df.columns), 1)
+
+    # 1) Intento de "cabe sin crecer" (compactando primero si hace falta)
+    cabe, motivo = _fits_without_growth(sh, ws, nrows, ncols)
+    print(f"[Sheets] Verificación de capacidad → {motivo}")
+
+    if not cabe and "no supera límite" in motivo:
+        # Podemos crecer sin pasar el límite global ⇒ crece de forma mínima
+        curr_rows, curr_cols = ws.row_count, ws.col_count
+        add_r = max(0, nrows - curr_rows)
+        add_c = max(0, ncols - curr_cols)
+        if add_r:
+            ws.add_rows(add_r)
+        if add_c:
+            ws.add_cols(add_c)
+    elif not cabe and "superaría el límite" in motivo:
+        # 2) No podemos crecer. Recortamos DF para que encaje sin aumentar celdas.
+        curr_rows, curr_cols = ws.row_count, ws.col_count
+        target_rows = max(min(nrows, curr_rows), 1)
+        target_cols = max(min(ncols, curr_cols), 1)
+
+        # Mantiene encabezados + (target_rows - 1) últimas filas
+        keep_n = max(target_rows - 1, 0)
+        if keep_n < len(df):
+            print(f"[Sheets] ⚠️ Límite global alcanzado. Recortando a {keep_n} filas de datos (+ encabezado) para encajar sin crecer.")
+            df = df.tail(keep_n).reset_index(drop=True)
+
+        # Si sobran columnas (df>target_cols), recorta columnas derechas
+        if len(df.columns) > target_cols:
+            df = df.iloc[:, :target_cols]
+
+        # Actualiza dimensiones finales de escritura
+        nrows = max(len(df) + 1, 1)
+        ncols = max(len(df.columns), 1)
+
+        # Compacta exactamente al tamaño final (reduce celdas si hace falta)
+        ws.resize(rows=nrows, cols=ncols)
+
+    # 3) Limpia y escribe el rango objetivo exacto
     rng = f"A1:{rowcol_to_a1(nrows, ncols)}"
     ws.batch_clear([rng])
-
-    # 5) Escribe sin 'resize'
     set_with_dataframe(ws, df, include_index=False, resize=False)
-
 
 # ───────── 3) Texto & Clasificación ─────────
 def strip_accents(txt: str) -> str:
@@ -567,15 +647,16 @@ def main(argv=None):
         df_all = pd.DataFrame(registros)
 
     # Normalizaciones
-    df_all["Grupo"]  = df_all["Grupo"].map(strip_accents).fillna("")
-    df_all["Precio"] = pd.to_numeric(df_all["Precio"], errors="coerce")
+    if "Grupo" in df_all.columns:
+        df_all["Grupo"]  = df_all["Grupo"].map(strip_accents).fillna("")
+    df_all["Precio"] = pd.to_numeric(df_all.get("Precio"), errors="coerce")
 
     # Enriquecimiento
     df_all["Subgrupo"] = [assign_subgroup(n, g) for n, g in zip(df_all.get("Producto",""), df_all.get("Grupo",""))]
     df_all = enrich_unit_cols(df_all)
 
-    # Asegura columnas objetivo, tanto en actual como en histórico previo
-    ws, df_prev = _open_sheet()
+    # Abre hoja y trae histórico existente
+    sh, ws, df_prev = _open_sheet()
     target_cols = [
         "ID","Supermercado","Producto","Precio","Unidad","Grupo","Subgrupo",
         "FechaConsulta","unidad_corregido","etiquetaunidad","cantidad_unidades","precio_unidad",
@@ -591,11 +672,14 @@ def main(argv=None):
     base["FechaConsulta"] = pd.to_datetime(base["FechaConsulta"], errors="coerce")
     base.sort_values("FechaConsulta", inplace=True)
 
+    # Para clave por día, dejamos sólo la fecha (no hora)
     base["FechaConsulta"] = base["FechaConsulta"].dt.strftime("%Y-%m-%d")
-    # Garantiza que las claves existan antes de de-duplicar
+
+    # Garantiza claves
     for k in KEY_COLS:
         if k not in base.columns:
             base[k] = ""
+
     base.drop_duplicates(KEY_COLS, keep="first", inplace=True)
 
     # ID secuencial
@@ -603,13 +687,15 @@ def main(argv=None):
         base.drop(columns=["ID"], inplace=True, errors="ignore")
     base.insert(0, "ID", range(1, len(base) + 1))
 
-    # Redondeos
+    # Redondeos amables
     base["Precio"] = pd.to_numeric(base["Precio"], errors="coerce").round(2)
     base["cantidad_unidades"] = pd.to_numeric(base["cantidad_unidades"], errors="coerce").round(3)
     base["precio_unidad"] = pd.to_numeric(base["precio_unidad"], errors="coerce").round(3)
 
-    _write_sheet(ws, base[target_cols])
-    print(f"✅ Hoja '{WORKSHEET_NAME}' actualizada: {len(base)} filas totales")
+    # --- Escritura robusta (sin exceder 10M celdas) ---
+    _write_sheet(ws, sh, base[target_cols])
+    total_cells = _audit_total_cells(sh)
+    print(f"✅ Hoja '{WORKSHEET_NAME}' actualizada: {len(base)} filas totales | Celdas del libro: {total_cells:,}")
     return 0
 
 if __name__ == "__main__":
