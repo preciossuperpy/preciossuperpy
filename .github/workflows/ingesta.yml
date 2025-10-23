@@ -1,0 +1,26 @@
+name: ingesta-diaria
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 12 * * *'  # 12:15 UTC (ajusta a tu preferencia)
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}   # <-- NOMBRE ESTÁNDAR
+      SPREADSHEET_URL: https://docs.google.com/spreadsheets/d/1plZ1LzHu2W2TrbV7wXPueWsO2g4dFRyUdpxXIUE5ns8
+      OUT_DIR: ./data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run pipeline
+        run: |
+          python pipeline_ingesta.py
