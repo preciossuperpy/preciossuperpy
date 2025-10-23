@@ -102,9 +102,34 @@ def _open_sheet():
     df = get_as_dataframe(ws, dtype=str, header=0, evaluate_formulas=False).dropna(how="all")
     return ws, df
 
-def _write_sheet(ws, df: pd.DataFrame):
-    # Redimensiona la hoja a las columnas del DataFrame y carga todo de una
-    set_with_dataframe(ws, df, include_index=False, resize=True)
+# Reemplaza tu _write_sheet por esto:
+from gspread_dataframe import set_with_dataframe
+from gspread.utils import rowcol_to_a1
+
+def _write_sheet(ws, df):
+    # 1) Limita columnas a las necesarias
+    df = df.copy()  # y, si procede, df = df[target_cols].copy()
+
+    # 2) Calcula tamaño objetivo (encabezado + datos)
+    nrows = len(df) + 1
+    ncols = len(df.columns)
+
+    # 3) Aumenta sólo si hace falta (sin 'resize' masivo)
+    #    OJO: cada add_rows/add_cols suma celdas al libro; evita exceso.
+    add_r = max(0, nrows - ws.row_count)
+    add_c = max(0, ncols - ws.col_count)
+    if add_r:
+        ws.add_rows(add_r)   # evita redimensionar a millones
+    if add_c:
+        ws.add_cols(add_c)
+
+    # 4) Limpia el rango objetivo (no toda la hoja)
+    rng = f"A1:{rowcol_to_a1(nrows, ncols)}"
+    ws.batch_clear([rng])
+
+    # 5) Escribe sin 'resize'
+    set_with_dataframe(ws, df, include_index=False, resize=False)
+
 
 # ───────── 3) Texto & Clasificación ─────────
 def strip_accents(txt: str) -> str:
